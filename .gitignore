@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.venv/
+env/
+venv/
+
+# local data & caches
+data/
+fec_cache*
+*.sqlite
+
+# secrets
+.env
+*.key
+*.pem
+
+# macOS cruft
+.DS_Store
+
+# jupyter
+.ipynb_checkpoints/
