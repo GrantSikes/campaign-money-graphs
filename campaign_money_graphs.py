@@ -203,9 +203,7 @@ class HourlyRateLimiter:
 
 
 # -------------------- HTTP client -------------------- #
-def make_session(
-    cache_name="fec_cache", expire_after=24 * 3600, retries: int = 4, backoff: float = 1.5
-):
+def make_session(cache_name="fec_cache", expire_after=24 * 3600, retries: int = 4, backoff: float = 1.5):
     sess = requests_cache.CachedSession(
         cache_name=cache_name,
         backend="sqlite",
@@ -616,9 +614,9 @@ def build_pipeline(
             com["_candidate_name"] = row.get("name")
         if max_committees_per_candidate:
             # prioritize principal/authorized first
-            coms = sorted(
-                coms, key=lambda r: (r.get("designation") not in ("P", "A"), r.get("committee_id"))
-            )[:max_committees_per_candidate]
+            coms = sorted(coms, key=lambda r: (r.get("designation") not in ("P", "A"), r.get("committee_id")))[
+                :max_committees_per_candidate
+            ]
         rows_comm.extend(coms)
 
     if not rows_comm:
@@ -638,9 +636,7 @@ def build_pipeline(
         if col not in df_comm.columns:
             df_comm[col] = None
     df_comm["is_principal_or_auth"] = df_comm["designation"].isin(["P", "A"])
-    df_comm.sort_values(
-        ["_candidate_id", "is_principal_or_auth"], ascending=[True, False], inplace=True
-    )
+    df_comm.sort_values(["_candidate_id", "is_principal_or_auth"], ascending=[True, False], inplace=True)
     sanitize_df(df_comm[keep_m + ["is_principal_or_auth"]].drop_duplicates("committee_id")).to_csv(
         "data/committees.csv",
         index=False,
@@ -677,9 +673,7 @@ def build_pipeline(
             contrib_rows.append(r)
 
     if not contrib_rows:
-        raise RuntimeError(
-            "No contributions pulled; loosen filters or increase --timeout/--retries."
-        )
+        raise RuntimeError("No contributions pulled; loosen filters or increase --timeout/--retries.")
     df_a = pd.DataFrame(contrib_rows)
 
     # clean/filter
@@ -741,9 +735,7 @@ def build_pipeline(
 
     # metrics
     deg_cent = nx.degree_centrality(G)
-    strength = {
-        n: sum(ed.get("weight", 1.0) for _, _, ed in G.edges(n, data=True)) for n in G.nodes()
-    }
+    strength = {n: sum(ed.get("weight", 1.0) for _, _, ed in G.edges(n, data=True)) for n in G.nodes()}
     nx.set_node_attributes(G, deg_cent, "degree_centrality")
     nx.set_node_attributes(G, strength, "strength")
 
@@ -783,9 +775,7 @@ def build_pipeline(
         doublequote=True,
     )
 
-    edge_rows = [
-        {"source": u, "target": v, "weight": d.get("weight", 1.0)} for u, v, d in G.edges(data=True)
-    ]
+    edge_rows = [{"source": u, "target": v, "weight": d.get("weight", 1.0)} for u, v, d in G.edges(data=True)]
     df_edges = pd.DataFrame(edge_rows).sort_values("weight", ascending=False)
     sanitize_df(df_edges).to_csv(
         "data/edges.csv",
@@ -800,16 +790,12 @@ def build_pipeline(
     cluster_groups: dict[int, list[str]] = defaultdict(list)
     for n, cl in clusters.items():
         cluster_groups[cl].append(n)
-    ranked = sorted(cluster_groups.items(), key=lambda kv: len(kv[1]), reverse=True)[
-        :top_n_clusters
-    ]
+    ranked = sorted(cluster_groups.items(), key=lambda kv: len(kv[1]), reverse=True)[:top_n_clusters]
 
     def top_members(nodes_list: list[str], k=8):
         cands = [n for n in nodes_list if G.nodes[n]["kind"] == "candidate"]
         dons = [n for n in nodes_list if G.nodes[n]["kind"] == "donor"]
-        cands_sorted = sorted(cands, key=lambda n: G.nodes[n].get("strength", 0.0), reverse=True)[
-            :k
-        ]
+        cands_sorted = sorted(cands, key=lambda n: G.nodes[n].get("strength", 0.0), reverse=True)[:k]
         dons_sorted = sorted(dons, key=lambda n: G.nodes[n].get("strength", 0.0), reverse=True)[:k]
 
         def fmt(nodes):
@@ -836,9 +822,7 @@ def build_pipeline(
     G_draw = G
     if df_edges.shape[0] > edge_cap:
         thresh = df_edges.nlargest(edge_cap, "weight")["weight"].min()
-        keep = {
-            (r["source"], r["target"]) for _, r in df_edges[df_edges["weight"] >= thresh].iterrows()
-        }
+        keep = {(r["source"], r["target"]) for _, r in df_edges[df_edges["weight"] >= thresh].iterrows()}
         H = nx.Graph()
         for n, d in G.nodes(data=True):
             H.add_node(n, **d)
@@ -994,28 +978,18 @@ def build_pipeline(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Build Campaign Money Graphs (FEC Schedule A) + AL donor map"
-    )
+    parser = argparse.ArgumentParser(description="Build Campaign Money Graphs (FEC Schedule A) + AL donor map")
     parser.add_argument("--state", default="AL", help="State for candidates (e.g., AL)")
-    parser.add_argument(
-        "--cycle", type=int, default=DEFAULT_TWO_YEAR, help="Two-year period (e.g., 2024, 2022)"
-    )
+    parser.add_argument("--cycle", type=int, default=DEFAULT_TWO_YEAR, help="Two-year period (e.g., 2024, 2022)")
     parser.add_argument(
         "--office",
         default="H",
         choices=["H", "S", "P"],
         help="H (House), S (Senate), P (President)",
     )
-    parser.add_argument(
-        "--donor-state", default=None, help="Optional contributor_state filter (e.g., AL)"
-    )
-    parser.add_argument(
-        "--min-amount", type=float, default=0.0, help="Filter contributions below this amount"
-    )
-    parser.add_argument(
-        "--top-n-clusters", type=int, default=10, help="How many clusters to summarize"
-    )
+    parser.add_argument("--donor-state", default=None, help="Optional contributor_state filter (e.g., AL)")
+    parser.add_argument("--min-amount", type=float, default=0.0, help="Filter contributions below this amount")
+    parser.add_argument("--top-n-clusters", type=int, default=10, help="How many clusters to summarize")
     parser.add_argument(
         "--max-committees-per-candidate",
         type=int,
@@ -1028,24 +1002,16 @@ if __name__ == "__main__":
         default=None,
         help="Trim pages per committee (each page=100 rows)",
     )
-    parser.add_argument(
-        "--edge-cap", type=int, default=5000, help="Trim visualization to strongest N edges"
-    )
-    parser.add_argument(
-        "--api-key", default=None, help="FEC API key (optional; else use env FEC_API_KEY)"
-    )
+    parser.add_argument("--edge-cap", type=int, default=5000, help="Trim visualization to strongest N edges")
+    parser.add_argument("--api-key", default=None, help="FEC API key (optional; else use env FEC_API_KEY)")
     parser.add_argument(
         "--timeout",
         type=int,
         default=90,
         help="HTTP timeout seconds (increase if you see ReadTimeout)",
     )
-    parser.add_argument(
-        "--retries", type=int, default=4, help="HTTP retry count for timeouts/5xx/429"
-    )
-    parser.add_argument(
-        "--skip-map", action="store_true", help="Skip building the Alabama donor ZIP map"
-    )
+    parser.add_argument("--retries", type=int, default=4, help="HTTP retry count for timeouts/5xx/429")
+    parser.add_argument("--skip-map", action="store_true", help="Skip building the Alabama donor ZIP map")
     parser.add_argument("--map-state", default="AL", help="State to map ZIPs for (default AL)")
 
     args = parser.parse_args()
