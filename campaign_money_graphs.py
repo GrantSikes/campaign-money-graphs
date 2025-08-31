@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# ruff: noqa: E402
 """
 Campaign Money Graphs — single-file runner (self-bootstrapping, with AL donor ZIP map)
 
