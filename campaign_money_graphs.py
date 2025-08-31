@@ -234,7 +234,6 @@ class FECClient:
         # main request
         resp = self.session.get(url, params=p, timeout=self.timeout)
         if not getattr(resp, "from_cache", False):
-            remaining = resp.headers.get("X-RateLimit-Remaining")
             reset = resp.headers.get("X-RateLimit-Reset")
             reset_in = None
             if reset:
