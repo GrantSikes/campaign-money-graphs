@@ -7,10 +7,9 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-# E: pycodestyle errors, F: pyflakes, I: import sorting, UP: pyupgrade
+# E: pycodestyle errors, F: pyflakes, I: import sort, UP: pyupgrade
 select = ["E", "F", "I", "UP"]
-ignore = ["E402"]  # allow bootstrap (ensure_deps) before some imports
+ignore = ["E402"]  # global ignore if you want; we'll also do per-file below
 
 [tool.ruff.lint.per-file-ignores]
-# If you ever want per-file ignores (keep for clarity)
-"campaign_money_graphs.py" = ["E402"]
+"campaign_money_graphs.py" = ["E402", "E501"]
