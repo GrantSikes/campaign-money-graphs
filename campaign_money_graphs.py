@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # ruff: noqa: E402
 """
 Campaign Money Graphs — single-file runner (self-bootstrapping, with AL donor ZIP map)
@@ -28,17 +27,16 @@ Provide your FEC key (choose ONE):
 
 from __future__ import annotations
 
-import os
-import sys
-import time
-import math
-import re
 import csv
 import json
+import math
+import os
+import re
 import subprocess
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+import sys
+import time
 from collections import defaultdict, deque
+from dataclasses import dataclass
 
 # ============  (C) OPTIONAL: paste your key here  ============
 HARDCODED_FEC_API_KEY = ""  # <-- PASTE KEY HERE only if you can't use A/B
@@ -54,8 +52,9 @@ REQUIRED = [
     ("pyvis", "pyvis"),
     ("community", "python-louvain"),  # community_louvain
     ("urllib3", "urllib3"),
-    ("pgeocode", "pgeocode"),         # ZIP -> lat/lon
+    ("pgeocode", "pgeocode"),  # ZIP -> lat/lon
 ]
+
 
 def _pip_install(pkg: str) -> None:
     cmd = [sys.executable, "-m", "pip", "install", "--upgrade", pkg]
@@ -66,6 +65,7 @@ def _pip_install(pkg: str) -> None:
             print(f"[warn] pip install failed for {pkg}\n{completed.stderr}")
     except Exception as e:
         print(f"[warn] pip install crashed for {pkg}: {e}")
+
 
 def ensure_deps() -> None:
     to_install = []
@@ -79,28 +79,31 @@ def ensure_deps() -> None:
         for pipname in to_install:
             _pip_install(pipname)
 
+
 ensure_deps()
 
 # now safe to import
+import networkx as nx
+import pandas as pd
 import requests
 import requests_cache
-import pandas as pd
-import networkx as nx
 from tqdm import tqdm
 
 try:
     import community as community_louvain  # python-louvain
+
     _HAS_LOUVAIN = True
 except Exception:
     _HAS_LOUVAIN = False
 
+import pgeocode
 from pyvis.network import Network
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import pgeocode
 
 FEC_BASE = "https://api.open.fec.gov/v1"
 DEFAULT_TWO_YEAR = 2024
+
 
 # -------------------- path hygiene -------------------- #
 def chdir_to_script():
@@ -111,12 +114,15 @@ def chdir_to_script():
     except Exception:
         pass
 
+
 def ensure_dirs():
     os.makedirs("data", exist_ok=True)
     os.makedirs("output", exist_ok=True)
 
+
 chdir_to_script()
 ensure_dirs()
+
 
 # -------------------- utils -------------------- #
 def normalize_name(name: str) -> str:
@@ -128,6 +134,7 @@ def normalize_name(name: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
+
 def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
     """Strip newlines/oddballs so CSV exports are bulletproof."""
     out = df.copy()
@@ -137,9 +144,10 @@ def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
                 out[col]
                 .astype(str)
                 .str.replace(r"[\r\n]+", " ", regex=True)  # kill line breaks
-                .str.replace("\u0000", " ")               # any stray nulls
+                .str.replace("\u0000", " ")  # any stray nulls
             )
     return out
+
 
 def donor_key(row: dict) -> str:
     cid = row.get("contributor_id")
@@ -149,18 +157,20 @@ def donor_key(row: dict) -> str:
     z = str(row.get("contributor_zip", "") or "").strip()
     return f"NMZ:{nm}|{z}"
 
+
 # -------------------- rate limiter -------------------- #
 class HourlyRateLimiter:
     """
     Caps calls to stay under 1000/hr. Default ~900/hr (15 rpm).
     Also backs off if FEC replies 429 with reset hints.
     """
+
     def __init__(self, max_per_hour: int = 950, rpm: int = 15):
         self.max_per_hour = max_per_hour
         self.rpm = rpm
         self.calls = deque()
 
-    def wait(self, remaining_header: Optional[str] = None, reset_in_sec: Optional[int] = None):
+    def wait(self, remaining_header: str | None = None, reset_in_sec: int | None = None):
         now = time.time()
         # slide window
         while self.calls and now - self.calls[0] > 3600:
@@ -191,8 +201,11 @@ class HourlyRateLimiter:
 
         self.calls.append(time.time())
 
+
 # -------------------- HTTP client -------------------- #
-def make_session(cache_name="fec_cache", expire_after=24*3600, retries:int=4, backoff:float=1.5):
+def make_session(
+    cache_name="fec_cache", expire_after=24 * 3600, retries: int = 4, backoff: float = 1.5
+):
     sess = requests_cache.CachedSession(
         cache_name=cache_name,
         backend="sqlite",
@@ -216,6 +229,7 @@ def make_session(cache_name="fec_cache", expire_after=24*3600, retries:int=4, ba
     sess.mount("https://", adapter)
     sess.mount("http://", adapter)
     return sess
+
 
 @dataclass
 class FECClient:
@@ -251,8 +265,14 @@ class FECClient:
             raise RuntimeError(f"FEC error {resp.status_code}: {resp.text[:400]}")
         return resp.json()
 
-    def _paged(self, endpoint: str, params: dict, page_key: str = "page", per_page: int = 100,
-               max_pages: Optional[int] = None):
+    def _paged(
+        self,
+        endpoint: str,
+        params: dict,
+        page_key: str = "page",
+        per_page: int = 100,
+        max_pages: int | None = None,
+    ):
         page = 1
         out = []
         while True:
@@ -272,27 +292,32 @@ class FECClient:
         return out
 
     # endpoints
-    def candidates(self, state: str, office: str, cycle: int) -> List[dict]:
+    def candidates(self, state: str, office: str, cycle: int) -> list[dict]:
         params = dict(state=state, office=office, election_year=cycle, cycle=cycle, sort="name")
         return self._paged("candidates", params)
 
-    def committees_for_candidate(self, candidate_id: str, cycle: int) -> List[dict]:
+    def committees_for_candidate(self, candidate_id: str, cycle: int) -> list[dict]:
         # Try candidate-specific endpoint first; fall back to general search
         try:
             return self._paged(f"candidate/{candidate_id}/committees", {"cycle": cycle})
         except Exception:
             return self._paged("committees", {"candidate_id": candidate_id, "cycle": cycle})
 
-    def schedule_a_for_committee(self, committee_id: str, two_year_transaction_period: int,
-                                 contributor_state: Optional[str] = None,
-                                 per_page: int = 100, max_pages: Optional[int] = None,
-                                 is_individual: bool = True) -> List[dict]:
+    def schedule_a_for_committee(
+        self,
+        committee_id: str,
+        two_year_transaction_period: int,
+        contributor_state: str | None = None,
+        per_page: int = 100,
+        max_pages: int | None = None,
+        is_individual: bool = True,
+    ) -> list[dict]:
         params = {
             "committee_id": committee_id,
             "two_year_transaction_period": two_year_transaction_period,
             "sort_hide_null": "false",
             "sort": "-contribution_receipt_date",
-            "per_page": per_page
+            "per_page": per_page,
         }
         if is_individual:
             params["is_individual"] = "true"
@@ -300,13 +325,14 @@ class FECClient:
             params["contributor_state"] = contributor_state
         return self._paged("schedules/schedule_a/", params, max_pages=max_pages)
 
+
 # -------------------- donor ZIP -> lat/lon -------------------- #
-def geocode_zip_us(zip_codes: List[str]) -> Dict[str, Tuple[float, float, str]]:
+def geocode_zip_us(zip_codes: list[str]) -> dict[str, tuple[float, float, str]]:
     """
     Returns {zip: (lat, lon, state_code)} for 5-digit ZIPs that resolve in Nominatim.
     """
     nomi = pgeocode.Nominatim("us")
-    out: Dict[str, Tuple[float, float, str]] = {}
+    out: dict[str, tuple[float, float, str]] = {}
     # pgeocode handles vectorized lookups too, but we’ll be explicit & robust
     unique = sorted({z.strip() for z in zip_codes if z and isinstance(z, str)})
     if not unique:
@@ -322,6 +348,7 @@ def geocode_zip_us(zip_codes: List[str]) -> Dict[str, Tuple[float, float, str]]:
         if z and pd.notna(lat) and pd.notna(lon):
             out[z] = (float(lat), float(lon), st)
     return out
+
 
 # -------------------- render AL donor map -------------------- #
 def write_alabama_map_html(dataset: dict, html_path: str = "output/donor_map_AL.html") -> None:
@@ -516,20 +543,23 @@ def write_alabama_map_html(dataset: dict, html_path: str = "output/donor_map_AL.
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
+
 # -------------------- pipeline -------------------- #
-def build_pipeline(state="AL",
-                   cycle=DEFAULT_TWO_YEAR,
-                   office="H",
-                   donor_state: Optional[str] = None,
-                   min_amount: float = 0.0,
-                   top_n_clusters: int = 10,
-                   max_committees_per_candidate: Optional[int] = None,
-                   max_pages_per_committee: Optional[int] = None,
-                   edge_cap: int = 5000,
-                   timeout: int = 90,
-                   retries: int = 4,
-                   make_map: bool = True,
-                   map_state: str = "AL"):
+def build_pipeline(
+    state="AL",
+    cycle=DEFAULT_TWO_YEAR,
+    office="H",
+    donor_state: str | None = None,
+    min_amount: float = 0.0,
+    top_n_clusters: int = 10,
+    max_committees_per_candidate: int | None = None,
+    max_pages_per_committee: int | None = None,
+    edge_cap: int = 5000,
+    timeout: int = 90,
+    retries: int = 4,
+    make_map: bool = True,
+    map_state: str = "AL",
+):
     ensure_dirs()
 
     # key resolution (CLI/env/hardcoded)
@@ -544,7 +574,7 @@ def build_pipeline(state="AL",
 
     client = FECClient(
         api_key=api_key,
-        session=make_session(cache_name="fec_cache", expire_after=24*3600, retries=retries),
+        session=make_session(cache_name="fec_cache", expire_after=24 * 3600, retries=retries),
         limiter=HourlyRateLimiter(max_per_hour=950, rpm=15),  # ≈900/hr, under 1000/hr
         timeout=timeout,
     )
@@ -555,18 +585,29 @@ def build_pipeline(state="AL",
     if not cands:
         raise RuntimeError("No candidates returned. Try different params.")
     df_cands = pd.DataFrame(cands)
-    keep_c = ["candidate_id", "name", "party_full", "office_full", "state", "incumbent_challenge_full"]
+    keep_c = [
+        "candidate_id",
+        "name",
+        "party_full",
+        "office_full",
+        "state",
+        "incumbent_challenge_full",
+    ]
     for col in keep_c:
         if col not in df_cands.columns:
             df_cands[col] = None
     sanitize_df(df_cands[keep_c]).to_csv(
-        "data/candidates.csv", index=False,
-        quoting=csv.QUOTE_ALL, escapechar="\\", lineterminator="\n", doublequote=True
+        "data/candidates.csv",
+        index=False,
+        quoting=csv.QUOTE_ALL,
+        escapechar="\\",
+        lineterminator="\n",
+        doublequote=True,
     )
 
     # 2) Committees
     print("[step] committees for candidates…")
-    rows_comm: List[dict] = []
+    rows_comm: list[dict] = []
     for _, row in tqdm(df_cands.iterrows(), total=len(df_cands)):
         cid = row["candidate_id"]
         coms = client.committees_for_candidate(cid, cycle=cycle)
@@ -576,29 +617,42 @@ def build_pipeline(state="AL",
         if max_committees_per_candidate:
             # prioritize principal/authorized first
             coms = sorted(
-                coms,
-                key=lambda r: (r.get("designation") not in ("P", "A"), r.get("committee_id"))
+                coms, key=lambda r: (r.get("designation") not in ("P", "A"), r.get("committee_id"))
             )[:max_committees_per_candidate]
         rows_comm.extend(coms)
 
     if not rows_comm:
         raise RuntimeError("No committees found.")
     df_comm = pd.DataFrame(rows_comm)
-    keep_m = ["committee_id", "name", "designation", "designation_full",
-              "committee_type", "treasurer_name", "_candidate_id", "_candidate_name"]
+    keep_m = [
+        "committee_id",
+        "name",
+        "designation",
+        "designation_full",
+        "committee_type",
+        "treasurer_name",
+        "_candidate_id",
+        "_candidate_name",
+    ]
     for col in keep_m:
         if col not in df_comm.columns:
             df_comm[col] = None
     df_comm["is_principal_or_auth"] = df_comm["designation"].isin(["P", "A"])
-    df_comm.sort_values(["_candidate_id", "is_principal_or_auth"], ascending=[True, False], inplace=True)
+    df_comm.sort_values(
+        ["_candidate_id", "is_principal_or_auth"], ascending=[True, False], inplace=True
+    )
     sanitize_df(df_comm[keep_m + ["is_principal_or_auth"]].drop_duplicates("committee_id")).to_csv(
-        "data/committees.csv", index=False,
-        quoting=csv.QUOTE_ALL, escapechar="\\", lineterminator="\n", doublequote=True
+        "data/committees.csv",
+        index=False,
+        quoting=csv.QUOTE_ALL,
+        escapechar="\\",
+        lineterminator="\n",
+        doublequote=True,
     )
 
     # 3) Schedule A contributions
     print("[step] schedule_a individuals… (this can take a bit)")
-    contrib_rows: List[dict] = []
+    contrib_rows: list[dict] = []
     uniq_committees = df_comm["committee_id"].dropna().drop_duplicates().tolist()
     iterator = df_comm.drop_duplicates("committee_id").iterrows()
     for _, row in tqdm(iterator, total=len(uniq_committees)):
@@ -607,10 +661,10 @@ def build_pipeline(state="AL",
             res = client.schedule_a_for_committee(
                 committee_id=committee_id,
                 two_year_transaction_period=cycle,
-                contributor_state=donor_state,   # None = all states
+                contributor_state=donor_state,  # None = all states
                 per_page=100,
                 max_pages=max_pages_per_committee,
-                is_individual=True
+                is_individual=True,
             )
         except Exception as e:
             print(f"[warn] schedule_a failed for {committee_id}: {e}. Skipping this committee.")
@@ -623,7 +677,9 @@ def build_pipeline(state="AL",
             contrib_rows.append(r)
 
     if not contrib_rows:
-        raise RuntimeError("No contributions pulled; loosen filters or increase --timeout/--retries.")
+        raise RuntimeError(
+            "No contributions pulled; loosen filters or increase --timeout/--retries."
+        )
     df_a = pd.DataFrame(contrib_rows)
 
     # clean/filter
@@ -633,28 +689,42 @@ def build_pipeline(state="AL",
     df_a = df_a[df_a[amt].fillna(0) > 0]
     if min_amount > 0:
         df_a = df_a[df_a[amt] >= float(min_amount)]
-    essentials = ["contributor_name","contributor_city","contributor_state","contributor_zip",
-                  "contribution_receipt_date", amt, "_committee_id","_candidate_id","_candidate_name","contributor_id"]
+    essentials = [
+        "contributor_name",
+        "contributor_city",
+        "contributor_state",
+        "contributor_zip",
+        "contribution_receipt_date",
+        amt,
+        "_committee_id",
+        "_candidate_id",
+        "_candidate_name",
+        "contributor_id",
+    ]
     for c in essentials:
         if c not in df_a.columns:
             df_a[c] = None
     sanitize_df(df_a[essentials]).to_csv(
-        "data/contributions_raw.csv", index=False,
-        quoting=csv.QUOTE_ALL, escapechar="\\", lineterminator="\n", doublequote=True
+        "data/contributions_raw.csv",
+        index=False,
+        quoting=csv.QUOTE_ALL,
+        escapechar="\\",
+        lineterminator="\n",
+        doublequote=True,
     )
 
     # 4) edges (donor-candidate weights)
     df_a["donor_key"] = df_a.apply(donor_key, axis=1)
     edges = (
-        df_a.groupby(["donor_key","_candidate_name"], dropna=False)[amt]
-            .sum()
-            .reset_index()
-            .rename(columns={amt: "weight", "_candidate_name": "candidate"})
+        df_a.groupby(["donor_key", "_candidate_name"], dropna=False)[amt]
+        .sum()
+        .reset_index()
+        .rename(columns={amt: "weight", "_candidate_name": "candidate"})
     )
     donor_name_map = (
         df_a.groupby("donor_key")["contributor_name"]
-            .agg(lambda s: normalize_name(s.dropna().iloc[0]) if len(s.dropna()) else "")
-            .to_dict()
+        .agg(lambda s: normalize_name(s.dropna().iloc[0]) if len(s.dropna()) else "")
+        .to_dict()
     )
 
     # 5) graph
@@ -671,12 +741,14 @@ def build_pipeline(state="AL",
 
     # metrics
     deg_cent = nx.degree_centrality(G)
-    strength = {n: sum(ed.get("weight",1.0) for _,_,ed in G.edges(n, data=True)) for n in G.nodes()}
+    strength = {
+        n: sum(ed.get("weight", 1.0) for _, _, ed in G.edges(n, data=True)) for n in G.nodes()
+    }
     nx.set_node_attributes(G, deg_cent, "degree_centrality")
     nx.set_node_attributes(G, strength, "strength")
 
     # communities
-    clusters: Dict[str,int] = {}
+    clusters: dict[str, int] = {}
     if _HAS_LOUVAIN and G.number_of_edges() > 0:
         clusters = community_louvain.best_partition(G, weight="weight")
     else:
@@ -690,49 +762,70 @@ def build_pipeline(state="AL",
     nx.set_node_attributes(G, clusters, "cluster")
 
     # exports (sanitized & quoted)
-    node_rows = [{
-        "node_id": n,
-        "label": d.get("label", n),
-        "kind": d.get("kind"),
-        "degree_centrality": d.get("degree_centrality", 0.0),
-        "strength": d.get("strength", 0.0),
-        "cluster": d.get("cluster", -1),
-    } for n, d in G.nodes(data=True)]
-    df_nodes = pd.DataFrame(node_rows).sort_values(["kind","strength"], ascending=[True, False])
+    node_rows = [
+        {
+            "node_id": n,
+            "label": d.get("label", n),
+            "kind": d.get("kind"),
+            "degree_centrality": d.get("degree_centrality", 0.0),
+            "strength": d.get("strength", 0.0),
+            "cluster": d.get("cluster", -1),
+        }
+        for n, d in G.nodes(data=True)
+    ]
+    df_nodes = pd.DataFrame(node_rows).sort_values(["kind", "strength"], ascending=[True, False])
     sanitize_df(df_nodes).to_csv(
-        "data/nodes.csv", index=False,
-        quoting=csv.QUOTE_ALL, escapechar="\\", lineterminator="\n", doublequote=True
+        "data/nodes.csv",
+        index=False,
+        quoting=csv.QUOTE_ALL,
+        escapechar="\\",
+        lineterminator="\n",
+        doublequote=True,
     )
 
-    edge_rows = [{"source": u, "target": v, "weight": d.get("weight", 1.0)} for u, v, d in G.edges(data=True)]
+    edge_rows = [
+        {"source": u, "target": v, "weight": d.get("weight", 1.0)} for u, v, d in G.edges(data=True)
+    ]
     df_edges = pd.DataFrame(edge_rows).sort_values("weight", ascending=False)
     sanitize_df(df_edges).to_csv(
-        "data/edges.csv", index=False,
-        quoting=csv.QUOTE_ALL, escapechar="\\", lineterminator="\n", doublequote=True
+        "data/edges.csv",
+        index=False,
+        quoting=csv.QUOTE_ALL,
+        escapechar="\\",
+        lineterminator="\n",
+        doublequote=True,
     )
 
     # brief clusters
-    cluster_groups: Dict[int, List[str]] = defaultdict(list)
+    cluster_groups: dict[int, list[str]] = defaultdict(list)
     for n, cl in clusters.items():
         cluster_groups[cl].append(n)
-    ranked = sorted(cluster_groups.items(), key=lambda kv: len(kv[1]), reverse=True)[:top_n_clusters]
+    ranked = sorted(cluster_groups.items(), key=lambda kv: len(kv[1]), reverse=True)[
+        :top_n_clusters
+    ]
 
-    def top_members(nodes_list: List[str], k=8):
+    def top_members(nodes_list: list[str], k=8):
         cands = [n for n in nodes_list if G.nodes[n]["kind"] == "candidate"]
-        dons  = [n for n in nodes_list if G.nodes[n]["kind"] == "donor"]
-        cands_sorted = sorted(cands, key=lambda n: G.nodes[n].get("strength", 0.0), reverse=True)[:k]
-        dons_sorted  = sorted(dons,  key=lambda n: G.nodes[n].get("strength", 0.0), reverse=True)[:k]
+        dons = [n for n in nodes_list if G.nodes[n]["kind"] == "donor"]
+        cands_sorted = sorted(cands, key=lambda n: G.nodes[n].get("strength", 0.0), reverse=True)[
+            :k
+        ]
+        dons_sorted = sorted(dons, key=lambda n: G.nodes[n].get("strength", 0.0), reverse=True)[:k]
+
         def fmt(nodes):
             out = []
             for x in nodes:
                 lab = G.nodes[x].get("label", x)
                 out.append(f"{lab} (Σ=${G.nodes[x].get('strength',0):,.0f})")
             return out
+
         return fmt(cands_sorted), fmt(dons_sorted)
 
     with open("output/top_clusters_brief.md", "w", encoding="utf-8") as f:
         f.write("# Top 10 Influence Clusters\n\n")
-        f.write(f"*State:* {state}  \n*Cycle:* {cycle}  \n*Office:* {office}  \n*Donor filter:* {donor_state or 'Any'}  \n*Min amount:* ${min_amount:,.0f}\n\n")
+        f.write(
+            f"*State:* {state}  \n*Cycle:* {cycle}  \n*Office:* {office}  \n*Donor filter:* {donor_state or 'Any'}  \n*Min amount:* ${min_amount:,.0f}\n\n"
+        )
         for i, (cid, members) in enumerate(ranked, 1):
             cand_list, donor_list = top_members(members, k=8)
             f.write(f"## Cluster {i} — ID {cid} (size {len(members)})\n")
@@ -743,7 +836,9 @@ def build_pipeline(state="AL",
     G_draw = G
     if df_edges.shape[0] > edge_cap:
         thresh = df_edges.nlargest(edge_cap, "weight")["weight"].min()
-        keep = {(r["source"], r["target"]) for _, r in df_edges[df_edges["weight"] >= thresh].iterrows()}
+        keep = {
+            (r["source"], r["target"]) for _, r in df_edges[df_edges["weight"] >= thresh].iterrows()
+        }
         H = nx.Graph()
         for n, d in G.nodes(data=True):
             H.add_node(n, **d)
@@ -753,8 +848,16 @@ def build_pipeline(state="AL",
         G_draw = H
 
     # Build PyVis graph
-    net = Network(height="900px", width="100%", bgcolor="#0b0f17", font_color="white", notebook=False, directed=False)
-    net.set_options("""
+    net = Network(
+        height="900px",
+        width="100%",
+        bgcolor="#0b0f17",
+        font_color="white",
+        notebook=False,
+        directed=False,
+    )
+    net.set_options(
+        """
 {
   "nodes": {
     "borderWidth": 1,
@@ -789,7 +892,8 @@ def build_pipeline(state="AL",
     "stabilization": { "enabled": true, "iterations": 1200, "updateInterval": 50 }
   }
 }
-""")
+"""
+    )
 
     # add nodes/edges
     for n, d in G_draw.nodes(data=True):
@@ -830,38 +934,40 @@ def build_pipeline(state="AL",
         amtcol = "contribution_receipt_amount"
         grouped = (
             df_al.groupby(["_candidate_name", "zip5"], dropna=False)[amtcol]
-                .agg(["sum", "count"])
-                .reset_index()
-                .rename(columns={"sum": "amount", "count": "count"})
+            .agg(["sum", "count"])
+            .reset_index()
+            .rename(columns={"sum": "amount", "count": "count"})
         )
 
         # Geocode unique zips
         zip_list = grouped["zip5"].dropna().unique().tolist()
         zmap = geocode_zip_us(zip_list)
 
-        byCandidate: Dict[str, List[dict]] = defaultdict(list)
+        byCandidate: dict[str, list[dict]] = defaultdict(list)
         for _, r in grouped.iterrows():
             nm = str(r["_candidate_name"])
-            z  = str(r["zip5"])
+            z = str(r["zip5"])
             geo = zmap.get(z)
             if not geo:
                 continue
             lat, lon, st = geo
             if st.upper() != map_state.upper():
                 continue
-            byCandidate[nm].append({
-                "zip": z,
-                "lat": lat,
-                "lon": lon,
-                "amount": float(r["amount"] or 0.0),
-                "count": int(r["count"] or 0),
-            })
+            byCandidate[nm].append(
+                {
+                    "zip": z,
+                    "lat": lat,
+                    "lon": lon,
+                    "amount": float(r["amount"] or 0.0),
+                    "count": int(r["count"] or 0),
+                }
+            )
 
         candidates_sorted = sorted(byCandidate.keys())
         dataset = {
             "center": [32.9, -86.8, 6],  # AL center-ish
             "byCandidate": byCandidate,
-            "candidates": candidates_sorted
+            "candidates": candidates_sorted,
         }
         html_path_map = "output/donor_map_AL.html"
         write_alabama_map_html(dataset, html_path=html_path_map)
@@ -883,23 +989,63 @@ def build_pipeline(state="AL",
     if make_map:
         print("  output/donor_map_AL.html")
 
+
 # -------------------- CLI -------------------- #
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Build Campaign Money Graphs (FEC Schedule A) + AL donor map")
+
+    parser = argparse.ArgumentParser(
+        description="Build Campaign Money Graphs (FEC Schedule A) + AL donor map"
+    )
     parser.add_argument("--state", default="AL", help="State for candidates (e.g., AL)")
-    parser.add_argument("--cycle", type=int, default=DEFAULT_TWO_YEAR, help="Two-year period (e.g., 2024, 2022)")
-    parser.add_argument("--office", default="H", choices=["H","S","P"], help="H (House), S (Senate), P (President)")
-    parser.add_argument("--donor-state", default=None, help="Optional contributor_state filter (e.g., AL)")
-    parser.add_argument("--min-amount", type=float, default=0.0, help="Filter contributions below this amount")
-    parser.add_argument("--top-n-clusters", type=int, default=10, help="How many clusters to summarize")
-    parser.add_argument("--max-committees-per-candidate", type=int, default=None, help="Trim committees per candidate (prioritize P/A)")
-    parser.add_argument("--max-pages-per-committee", type=int, default=None, help="Trim pages per committee (each page=100 rows)")
-    parser.add_argument("--edge-cap", type=int, default=5000, help="Trim visualization to strongest N edges")
-    parser.add_argument("--api-key", default=None, help="FEC API key (optional; else use env FEC_API_KEY)")
-    parser.add_argument("--timeout", type=int, default=90, help="HTTP timeout seconds (increase if you see ReadTimeout)")
-    parser.add_argument("--retries", type=int, default=4, help="HTTP retry count for timeouts/5xx/429")
-    parser.add_argument("--skip-map", action="store_true", help="Skip building the Alabama donor ZIP map")
+    parser.add_argument(
+        "--cycle", type=int, default=DEFAULT_TWO_YEAR, help="Two-year period (e.g., 2024, 2022)"
+    )
+    parser.add_argument(
+        "--office",
+        default="H",
+        choices=["H", "S", "P"],
+        help="H (House), S (Senate), P (President)",
+    )
+    parser.add_argument(
+        "--donor-state", default=None, help="Optional contributor_state filter (e.g., AL)"
+    )
+    parser.add_argument(
+        "--min-amount", type=float, default=0.0, help="Filter contributions below this amount"
+    )
+    parser.add_argument(
+        "--top-n-clusters", type=int, default=10, help="How many clusters to summarize"
+    )
+    parser.add_argument(
+        "--max-committees-per-candidate",
+        type=int,
+        default=None,
+        help="Trim committees per candidate (prioritize P/A)",
+    )
+    parser.add_argument(
+        "--max-pages-per-committee",
+        type=int,
+        default=None,
+        help="Trim pages per committee (each page=100 rows)",
+    )
+    parser.add_argument(
+        "--edge-cap", type=int, default=5000, help="Trim visualization to strongest N edges"
+    )
+    parser.add_argument(
+        "--api-key", default=None, help="FEC API key (optional; else use env FEC_API_KEY)"
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=90,
+        help="HTTP timeout seconds (increase if you see ReadTimeout)",
+    )
+    parser.add_argument(
+        "--retries", type=int, default=4, help="HTTP retry count for timeouts/5xx/429"
+    )
+    parser.add_argument(
+        "--skip-map", action="store_true", help="Skip building the Alabama donor ZIP map"
+    )
     parser.add_argument("--map-state", default="AL", help="State to map ZIPs for (default AL)")
 
     args = parser.parse_args()
