@@ -1,15 +1,14 @@
+# pyproject.toml
 [tool.black]
-line-length = 100
+line-length = 120
 target-version = ["py312"]
 
 [tool.ruff]
-line-length = 100
-target-version = "py312"
+line-length = 120
 
 [tool.ruff.lint]
-# E: pycodestyle errors, F: pyflakes, I: import sort, UP: pyupgrade
 select = ["E", "F", "I", "UP"]
-ignore = ["E402"]  # global ignore if you want; we'll also do per-file below
+ignore = []
 
-[tool.ruff.lint.per-file-ignores]
-"campaign_money_graphs.py" = ["E402", "E501"]
+# only ignore long lines in (HTML/JS strings)
+per-file-ignores = { "campaign_money_graphs.py" = ["E501"] }
