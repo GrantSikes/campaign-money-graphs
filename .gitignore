@@ -1,21 +1,20 @@
+cat > .gitignore << 'EOF'
+# Python
 __pycache__/
 *.pyc
+
+# Envs
 .venv/
-env/
-venv/
-
-# local data & caches
-data/
-fec_cache*
-*.sqlite
-
-# secrets
 .env
-*.key
-*.pem
 
-# macOS cruft
+# Data / outputs
+data/
+output/
+docs/*.tmp
+
+# OS/editor
 .DS_Store
-
-# jupyter
-.ipynb_checkpoints/
+.vscode/
+.idea/
+EOF
+git add .gitignore && git commit -m "chore: add .gitignore"
