@@ -239,20 +239,18 @@ class FECClient:
 
         self.limiter.wait()  # pre-wait
 
-        # main request
-        resp = self.session.get(url, params=p, timeout=self.timeout)
-        if not getattr(resp, "from_cache", False):
+       if not getattr(resp, "from_cache", False):
+    reset_in = None
+    reset_header = resp.headers.get("X-RateLimit-Reset")
+    if reset_header:
+        try:
+            reset_in = int(reset_header) - int(time.time())
+        except Exception:
             reset_in = None
-            if reset:
-                try:
-                    reset_in = int(reset) - int(time.time())
-                except Exception:
-                    reset_in = None
-            if resp.status_code == 429:
-                # honor server reset if provided
-                self.limiter.wait(remaining_header="0", reset_in_sec=reset_in or 30)
-                time.sleep(5)
-                resp = self.session.get(url, params=p, timeout=self.timeout)
+    if resp.status_code == 429:
+        self.limiter.wait(remaining_header="0", reset_in_sec=reset_in or 30)
+        time.sleep(5)
+        resp = self.session.get(url, params=p, timeout=self.timeout)
 
         if resp.status_code != 200:
             raise RuntimeError(f"FEC error {resp.status_code}: {resp.text[:400]}")
