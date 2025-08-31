@@ -58,13 +58,9 @@ REQUIRED = [
 
 def _pip_install(pkg: str) -> None:
     cmd = [sys.executable, "-m", "pip", "install", "--upgrade", pkg]
-    # Prefer capture_output over PIPEs (Ruff UP022) and don't crash the run
-    try:
-        completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if completed.returncode != 0:
-            print(f"[warn] pip install failed for {pkg}\n{completed.stderr}")
-    except Exception as e:
-        print(f"[warn] pip install crashed for {pkg}: {e}")
+    completed = subprocess.run(cmd, capture_output=True, text=True)   # <= changed
+    if completed.returncode != 0:
+        print(f"[warn] pip install failed for {pkg}\n{completed.stderr}")
 
 
 def ensure_deps() -> None:
@@ -246,7 +242,7 @@ class FECClient:
         # main request
         resp = self.session.get(url, params=p, timeout=self.timeout)
         if not getattr(resp, "from_cache", False):
-            reset = resp.headers.get("X-RateLimit-Reset")
+            reset = .get("X-RateLimit-Reset")
             reset_in = None
             if reset:
                 try:
