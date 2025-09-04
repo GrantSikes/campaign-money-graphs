@@ -1,29 +1,5 @@
-#!/usr/bin/env python3
+#python3
 # ruff: noqa: E402
-"""
-Campaign Money Graphs — single-file runner (self-bootstrapping, with AL donor ZIP map)
-
-What it does end-to-end:
-- Bootstraps dependencies (pip installs if missing)
-- Robust HTTP with retries/backoff; gentle rate limiting under <1000 calls/hr
-- Fetches FEC data: candidates -> committees -> Schedule A (individuals)
-- Cleans and quotes CSVs (prevents CSV line break / quote issues)
-- Builds a donor <-> candidate weighted network and detects communities
-- Exports:
-    data/candidates.csv
-    data/committees.csv
-    data/contributions_raw.csv
-    data/nodes.csv
-    data/edges.csv
-    output/top_clusters_brief.md
-    output/campaign_network.html  (interactive network)
-    output/donor_map_AL.html      (AL ZIP-dot map with clickable candidate list)
-
-Provide your FEC key (choose ONE):
-  A) CLI flag: --api-key "YOUR_REAL_FEC_KEY"   (recommended)
-  B) Env var : export FEC_API_KEY="YOUR_REAL_FEC_KEY"
-  C) (not recommended) paste below into HARDCODED_FEC_API_KEY
-"""
 
 from __future__ import annotations
 
@@ -38,11 +14,8 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
-# ============  (C) OPTIONAL: paste your key here  ============
-HARDCODED_FEC_API_KEY = ""  # <-- PASTE KEY HERE only if you can't use A/B
-# =============================================================
-
-# -------------------- dependency bootstrap -------------------- #
+HARDCODED_FEC_API_KEY = "" #would not recommend  
+# dependency bootstrap
 REQUIRED = [
     ("requests", "requests"),
     ("requests_cache", "requests-cache"),
@@ -58,7 +31,7 @@ REQUIRED = [
 
 def _pip_install(pkg: str) -> None:
     cmd = [sys.executable, "-m", "pip", "install", "--upgrade", pkg]
-    completed = subprocess.run(cmd, capture_output=True, text=True)   # <= changed
+    completed = subprocess.run(cmd, capture_output=True, text=True)  
     if completed.returncode != 0:
         print(f"[warn] pip install failed for {pkg}\n{completed.stderr}")
 
@@ -78,7 +51,7 @@ def ensure_deps() -> None:
 
 ensure_deps()
 
-# now safe to import
+# just to ensure install pip is filled
 import networkx as nx
 import pandas as pd
 import requests
@@ -101,7 +74,7 @@ FEC_BASE = "https://api.open.fec.gov/v1"
 DEFAULT_TWO_YEAR = 2024
 
 
-# -------------------- path hygiene -------------------- #
+# path hygiene
 def chdir_to_script():
     """Run from this file's folder to avoid path weirdness."""
     try:
@@ -120,7 +93,7 @@ chdir_to_script()
 ensure_dirs()
 
 
-# -------------------- utils -------------------- #
+# utils
 def normalize_name(name: str) -> str:
     if not isinstance(name, str):
         return ""
@@ -139,8 +112,8 @@ def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
             out[col] = (
                 out[col]
                 .astype(str)
-                .str.replace(r"[\r\n]+", " ", regex=True)  # kill line breaks
-                .str.replace("\u0000", " ")  # any stray nulls
+                .str.replace(r"[\r\n]+", " ", regex=True)  # kill the line breaks
+                .str.replace("\u0000", " ")  # & any stray nulls
             )
     return out
 
@@ -154,7 +127,7 @@ def donor_key(row: dict) -> str:
     return f"NMZ:{nm}|{z}"
 
 
-# -------------------- rate limiter -------------------- #
+# rate limiter for api since ftc has a low pull of 1000/h
 class HourlyRateLimiter:
     """
     Caps calls to stay under 1000/hr. Default ~900/hr (15 rpm).
@@ -198,7 +171,7 @@ class HourlyRateLimiter:
         self.calls.append(time.time())
 
 
-# -------------------- HTTP client -------------------- #
+# HTTP client
 def make_session(cache_name="fec_cache", expire_after=24 * 3600, retries: int = 4, backoff: float = 1.5):
     sess = requests_cache.CachedSession(
         cache_name=cache_name,
@@ -207,13 +180,13 @@ def make_session(cache_name="fec_cache", expire_after=24 * 3600, retries: int = 
         allowable_methods=("GET",),
         allowable_codes=(200,),
     )
-    # Robust retry for timeouts & 5xx & 429 (requests-cache still respects adapters)
+    # end-end retry for timeouts & 5xx & 429 errors (requests-cache still respect all adapters)
     retry = Retry(
         total=retries,
         connect=retries,
         read=retries,
         status=retries,
-        backoff_factor=backoff,  # exponential (1.5, 3.0, 4.5, …)
+        backoff_factor=backoff,  # need an exponential (1.5, 3.0, 4.5, …)
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["GET"],
         raise_on_status=False,
@@ -288,7 +261,7 @@ class FECClient:
         return self._paged("candidates", params)
 
     def committees_for_candidate(self, candidate_id: str, cycle: int) -> list[dict]:
-        # Try candidate-specific endpoint first; fall back to general search
+        # try candidate-specific endpoint first; then fall to gen search
         try:
             return self._paged(f"candidate/{candidate_id}/committees", {"cycle": cycle})
         except Exception:
@@ -317,14 +290,14 @@ class FECClient:
         return self._paged("schedules/schedule_a/", params, max_pages=max_pages)
 
 
-# -------------------- donor ZIP -> lat/lon -------------------- #
+# donor ZIP -> lat/lon
 def geocode_zip_us(zip_codes: list[str]) -> dict[str, tuple[float, float, str]]:
     """
     Returns {zip: (lat, lon, state_code)} for 5-digit ZIPs that resolve in Nominatim.
     """
     nomi = pgeocode.Nominatim("us")
     out: dict[str, tuple[float, float, str]] = {}
-    # pgeocode handles vectorized lookups too, but we’ll be explicit & robust
+    # pgeocode handles vectorized lookups too, but explicit & robust
     unique = sorted({z.strip() for z in zip_codes if z and isinstance(z, str)})
     if not unique:
         return out
@@ -341,7 +314,7 @@ def geocode_zip_us(zip_codes: list[str]) -> dict[str, tuple[float, float, str]]:
     return out
 
 
-# -------------------- render AL donor map -------------------- #
+# render state/alabama donor map via html section
 def write_alabama_map_html(dataset: dict, html_path: str = "output/donor_map_AL.html") -> None:
     """
     dataset = {
@@ -356,7 +329,6 @@ def write_alabama_map_html(dataset: dict, html_path: str = "output/donor_map_AL.
       "candidates": ["A", "B", ...]
     }
     """
-    # Keep it raw to avoid backslash-escape warnings
     PAGE = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -528,14 +500,14 @@ def write_alabama_map_html(dataset: dict, html_path: str = "output/donor_map_AL.
 </body>
 </html>
 """
-    # Inject JSON safely (no forward-slash escaping by default)
+    # inject json safely (no forward-slash escap as default :)
     payload = json.dumps(dataset, ensure_ascii=False)
     html = PAGE.replace("__DATA__", payload)
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
 
-# -------------------- pipeline -------------------- #
+#  pipeline
 def build_pipeline(
     state="AL",
     cycle=DEFAULT_TWO_YEAR,
@@ -553,7 +525,7 @@ def build_pipeline(
 ):
     ensure_dirs()
 
-    # key resolution (CLI/env/hardcoded)
+    # key resolution
     api_key = os.getenv("FEC_API_KEY")
     if not api_key and HARDCODED_FEC_API_KEY:
         api_key = HARDCODED_FEC_API_KEY
@@ -570,7 +542,7 @@ def build_pipeline(
         timeout=timeout,
     )
 
-    # 1) Candidates
+    # 1) candidates
     print(f"[step] candidates: state={state} office={office} cycle={cycle}")
     cands = client.candidates(state=state, office=office, cycle=cycle)
     if not cands:
@@ -596,7 +568,7 @@ def build_pipeline(
         doublequote=True,
     )
 
-    # 2) Committees
+    # 2) committees
     print("[step] committees for candidates…")
     rows_comm: list[dict] = []
     for _, row in tqdm(df_cands.iterrows(), total=len(df_cands)):
@@ -639,7 +611,7 @@ def build_pipeline(
         doublequote=True,
     )
 
-    # 3) Schedule A contributions
+    # 3) schedule (a) contributions
     print("[step] schedule_a individuals… (this can take a bit)")
     contrib_rows: list[dict] = []
     uniq_committees = df_comm["committee_id"].dropna().drop_duplicates().tolist()
@@ -650,7 +622,7 @@ def build_pipeline(
             res = client.schedule_a_for_committee(
                 committee_id=committee_id,
                 two_year_transaction_period=cycle,
-                contributor_state=donor_state,  # None = all states
+                contributor_state=donor_state,  # None = all states or specify
                 per_page=100,
                 max_pages=max_pages_per_committee,
                 is_individual=True,
@@ -669,7 +641,7 @@ def build_pipeline(
         raise RuntimeError("No contributions pulled; loosen filters or increase --timeout/--retries.")
     df_a = pd.DataFrame(contrib_rows)
 
-    # clean/filter
+    # clean/filter it all or try
     amt = "contribution_receipt_amount"
     if amt not in df_a.columns:
         df_a[amt] = 0.0
@@ -746,7 +718,7 @@ def build_pipeline(
             clusters = {n: 0 for n in G.nodes()}
     nx.set_node_attributes(G, clusters, "cluster")
 
-    # exports (sanitized & quoted)
+    # exports (sanitized &&& quoted)
     node_rows = [
         {
             "node_id": n,
@@ -811,7 +783,7 @@ def build_pipeline(
             f.write(f"**Top candidates:** {', '.join(cand_list) if cand_list else '—'}\n\n")
             f.write(f"**Top donors:** {', '.join(donor_list) if donor_list else '—'}\n\n")
 
-    # visualization trim for speed, keep detail
+    # visualization trim for speed, keep details though
     G_draw = G
     if df_edges.shape[0] > edge_cap:
         thresh = df_edges.nlargest(edge_cap, "weight")["weight"].min()
@@ -824,7 +796,7 @@ def build_pipeline(
                 H.add_edge(u, v, **d)
         G_draw = H
 
-    # Build PyVis graph
+    # build the PyVis graph
     net = Network(
         height="900px",
         width="100%",
@@ -872,7 +844,7 @@ def build_pipeline(
 """
     )
 
-    # add nodes/edges
+    # add the nodes/edges
     for n, d in G_draw.nodes(data=True):
         kind = d.get("kind")
         label = d.get("label", n)
@@ -899,7 +871,7 @@ def build_pipeline(
     except Exception:
         pass
 
-    # ---- Alabama ZIP Map (always computed from AL donors) ----
+    # alabama zip map (always comput via (al) donors)
     if make_map:
         print("[step] building Alabama ZIP donor map…")
         # We only want Alabama donors for the map
@@ -907,7 +879,7 @@ def build_pipeline(
         df_al["zip5"] = df_al["contributor_zip"].astype(str).str.extract(r"(\d{5})", expand=False)
         df_al = df_al.dropna(subset=["zip5"])
 
-        # Aggregate per candidate per ZIP
+        # aggregate per candidate per zip code
         amtcol = "contribution_receipt_amount"
         grouped = (
             df_al.groupby(["_candidate_name", "zip5"], dropna=False)[amtcol]
@@ -916,7 +888,7 @@ def build_pipeline(
             .rename(columns={"sum": "amount", "count": "count"})
         )
 
-        # Geocode unique zips
+        # geocode unique zips
         zip_list = grouped["zip5"].dropna().unique().tolist()
         zmap = geocode_zip_us(zip_list)
 
@@ -950,7 +922,7 @@ def build_pipeline(
         write_alabama_map_html(dataset, html_path=html_path_map)
         print(f"[map] Wrote {os.path.abspath(html_path_map)}")
         try:
-            subprocess.run(["open", html_path_map], check=False)  # macOS auto-open
+            subprocess.run(["open", html_path_map], check=False)
         except Exception:
             pass
 
@@ -967,7 +939,7 @@ def build_pipeline(
         print("  output/donor_map_AL.html")
 
 
-# -------------------- CLI -------------------- #
+# CLI
 if __name__ == "__main__":
     import argparse
 
@@ -1009,7 +981,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Resolve key order: CLI > env > hardcoded
+    # Resolve any api key order: CLI > env > hardcoded
     if args.api_key:
         os.environ["FEC_API_KEY"] = args.api_key
     elif not os.getenv("FEC_API_KEY") and HARDCODED_FEC_API_KEY:
